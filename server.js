@@ -12,11 +12,46 @@ const { execFile } = require('child_process');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ffmpeg路径 - 支持环境变量配置
-const FFMPEG_PATH = process.env.FFMPEG_PATH || 'E:\\sdk\\ffmpeg\\bin\\ffmpeg.exe';
-
-// 下载目录 - 支持环境变量配置
+// 配置项
+const FFMPEG_PATH = process.env.FFMPEG_PATH || (
+  process.platform === 'win32' 
+    ? 'E:\\sdk\\ffmpeg\\bin\\ffmpeg.exe' 
+    : '/usr/bin/ffmpeg'
+);
 const DOWNLOADS_DIR = process.env.DOWNLOADS_DIR || path.join(__dirname, 'downloads');
+const DOWNLOAD_CONCURRENCY = parseInt(process.env.DOWNLOAD_CONCURRENCY) || 10;
+const DB_FILE = path.join(__dirname, 'db.json');
+
+// 简单的JSON数据库
+class SimpleDB {
+  constructor(filePath) {
+    this.filePath = filePath;
+    this.data = { tasks: [], history: [] };
+    this.load();
+  }
+
+  load() {
+    try {
+      if (fs.existsSync(this.filePath)) {
+        const content = fs.readFileSync(this.filePath, 'utf-8');
+        this.data = JSON.parse(content);
+      }
+    } catch (error) {
+      console.error('加载数据库失败:', error.message);
+      this.data = { tasks: [], history: [] };
+    }
+  }
+
+  save() {
+    try {
+      fs.writeFileSync(this.filePath, JSON.stringify(this.data, null, 2));
+    } catch (error) {
+      console.error('保存数据库失败:', error.message);
+    }
+  }
+}
+
+const db = new SimpleDB(DB_FILE);
 
 // DLNA投屏相关
 let castClient = null;
@@ -76,15 +111,31 @@ function initDLNA() {
 // 启动DLNA发现
 initDLNA();
 
-// 加载视频源配置
-function loadConfig() {
+// 获取配置文件路径
+function getConfigPath() {
   const configFiles = fs.readdirSync(__dirname).filter(f => f.endsWith('.json') && f.includes('kvideo'));
   if (configFiles.length === 0) {
-    throw new Error('未找到视频源配置文件');
+    // 创建默认配置文件
+    const defaultPath = path.join(__dirname, 'kvideo-settings.json');
+    const defaultConfig = {
+      settings: {
+        sources: [],
+        sortBy: "default",
+        searchHistory: true,
+        watchHistory: true
+      }
+    };
+    fs.writeFileSync(defaultPath, JSON.stringify(defaultConfig, null, 2), 'utf-8');
+    return defaultPath;
   }
-  const configPath = path.join(__dirname, configFiles[0]);
+  return path.join(__dirname, configFiles[0]);
+}
+
+// 加载视频源配置
+function loadConfig() {
+  const configPath = getConfigPath();
   const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  return config.settings.sources.filter(s => s.enabled).sort((a, b) => a.priority - b.priority);
+  return (config.settings.sources || []).filter(s => s.enabled !== false).sort((a, b) => (a.priority || 999) - (b.priority || 999));
 }
 
 // 从API获取数据
@@ -192,11 +243,442 @@ function parsePlayUrls(vodPlayFrom, vodPlayUrl) {
 // 存储下载任务状态
 const downloadTasks = new Map();
 
+// 下载管理器
+class DownloadManager {
+  constructor() {
+    this.tasks = new Map();
+  }
+
+  // 创建任务
+  async createTask(videoName, episodes) {
+    const taskId = Date.now().toString();
+    const downloadDir = path.join(DOWNLOADS_DIR, videoName.replace(/[<>:"/\\|?*]/g, '_'));
+    
+    const task = {
+      id: taskId,
+      videoName,
+      downloadDir,
+      status: 'pending',
+      total: episodes.length,
+      completed: 0,
+      skipped: 0,
+      failed: 0,
+      current: '',
+      currentProgress: 0,
+      files: [],
+      episodes: episodes.map(ep => ({
+        ...ep,
+        status: 'pending',
+        progress: 0
+      })),
+      startTime: Date.now(),
+      endTime: null
+    };
+    
+    this.tasks.set(taskId, task);
+    
+    // 保存到数据库
+    db.data.tasks.push(task);
+    db.save();
+    
+    // 开始执行下载
+    this.executeTask(taskId);
+    
+    return taskId;
+  }
+
+  // 执行任务
+  async executeTask(taskId) {
+    const task = this.tasks.get(taskId);
+    if (!task) return;
+    
+    task.status = 'running';
+    await this.updateTask(task);
+    
+    for (let i = 0; i < task.episodes.length; i++) {
+      const episode = task.episodes[i];
+      const safeName = episode.name.replace(/[<>:"/\\|?*]/g, '_');
+      
+      // 检查文件是否已存在
+      const existingFiles = fs.existsSync(task.downloadDir) ? fs.readdirSync(task.downloadDir) : [];
+      const isDownloaded = existingFiles.some(f => f.startsWith(safeName) && (f.endsWith('.ts') || f.endsWith('.mp4')));
+      
+      if (isDownloaded) {
+        console.log(`跳过已下载: ${episode.name}`);
+        episode.status = 'skipped';
+        task.current = `${episode.name} (已存在)`;
+        task.skipped++;
+        task.completed++;
+        await this.updateTask(task);
+        continue;
+      }
+      
+      episode.status = 'downloading';
+      task.current = episode.name;
+      task.currentProgress = 0;
+      await this.updateTask(task);
+      
+      try {
+        console.log(`\n开始下载: ${episode.name}`);
+        const realUrl = await getRealUrl(episode.url);
+        const isM3U8 = realUrl.includes('.m3u8');
+        
+        if (isM3U8) {
+          await downloadM3U8(realUrl, task.downloadDir, safeName, task);
+        } else {
+          await downloadDirect(realUrl, task.downloadDir, safeName, task);
+        }
+        
+        episode.status = 'completed';
+        task.completed++;
+        task.currentProgress = 100;
+      } catch (error) {
+        episode.status = 'failed';
+        task.failed++;
+        console.error(`下载失败 ${episode.name}: ${error.message}`);
+      }
+      
+      await this.updateTask(task);
+    }
+    
+    task.status = 'completed';
+    task.current = '';
+    task.currentProgress = 0;
+    task.endTime = Date.now();
+    await this.updateTask(task);
+    
+    // 添加到历史记录
+    db.data.history.push({
+      id: task.id,
+      videoName: task.videoName,
+      total: task.total,
+      completed: task.completed,
+      skipped: task.skipped,
+      failed: task.failed,
+      startTime: task.startTime,
+      endTime: task.endTime
+    });
+    db.save();
+  }
+
+  // 更新任务状态
+  async updateTask(task) {
+    const index = db.data.tasks.findIndex(t => t.id === task.id);
+    if (index !== -1) {
+      db.data.tasks[index] = task;
+      db.save();
+    }
+  }
+
+  // 获取任务状态
+  getTask(taskId) {
+    return this.tasks.get(taskId);
+  }
+
+  // 获取所有任务
+  getAllTasks() {
+    return Array.from(this.tasks.values());
+  }
+
+  // 暂停任务
+  async pauseTask(taskId) {
+    const task = this.tasks.get(taskId);
+    if (task && task.status === 'running') {
+      task.status = 'paused';
+      await this.updateTask(task);
+    }
+  }
+
+  // 恢复任务
+  async resumeTask(taskId) {
+    const task = this.tasks.get(taskId);
+    if (task && task.status === 'paused') {
+      task.status = 'running';
+      await this.updateTask(task);
+      this.executeTask(taskId);
+    }
+  }
+
+  // 删除任务
+  async deleteTask(taskId) {
+    this.tasks.delete(taskId);
+    db.data.tasks = db.data.tasks.filter(t => t.id !== taskId);
+    db.save();
+  }
+
+  // 获取历史记录
+  getHistory() {
+    return db.data.history;
+  }
+}
+
+const downloadManager = new DownloadManager();
+
+// API: 开始下载任务
+app.post('/api/download', async (req, res) => {
+  const { videoName, episodes } = req.body;
+  
+  if (!videoName || !episodes || episodes.length === 0) {
+    return res.status(400).json({ success: false, error: '缺少参数' });
+  }
+  
+  try {
+    const taskId = await downloadManager.createTask(videoName, episodes);
+    res.json({ success: true, taskId });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: 获取下载任务状态
+app.get('/api/download/status/:taskId', (req, res) => {
+  const { taskId } = req.params;
+  const task = downloadManager.getTask(taskId);
+  
+  if (!task) {
+    return res.status(404).json({ success: false, error: '任务不存在' });
+  }
+  
+  res.json({ success: true, task });
+});
+
+// API: 获取所有下载任务
+app.get('/api/download/tasks', (req, res) => {
+  const tasks = downloadManager.getAllTasks();
+  res.json({ success: true, tasks });
+});
+
+// API: 暂停下载任务
+app.post('/api/download/pause/:taskId', async (req, res) => {
+  const { taskId } = req.params;
+  await downloadManager.pauseTask(taskId);
+  res.json({ success: true, message: '任务已暂停' });
+});
+
+// API: 恢复下载任务
+app.post('/api/download/resume/:taskId', async (req, res) => {
+  const { taskId } = req.params;
+  await downloadManager.resumeTask(taskId);
+  res.json({ success: true, message: '任务已恢复' });
+});
+
+// API: 删除下载任务
+app.delete('/api/download/:taskId', async (req, res) => {
+  const { taskId } = req.params;
+  await downloadManager.deleteTask(taskId);
+  res.json({ success: true, message: '任务已删除' });
+});
+
+// API: 获取下载历史
+app.get('/api/download/history', (req, res) => {
+  const history = downloadManager.getHistory();
+  res.json({ success: true, history });
+});
+
+// API: 获取配置
+app.get('/api/config', (req, res) => {
+  const sources = loadConfig();
+  res.json({
+    success: true,
+    config: {
+      port: PORT,
+      ffmpegPath: FFMPEG_PATH,
+      downloadsDir: DOWNLOADS_DIR,
+      downloadConcurrency: DOWNLOAD_CONCURRENCY,
+      sourcesCount: sources.length
+    }
+  });
+});
+
+// API: 更新配置
+app.post('/api/config', (req, res) => {
+  const { downloadConcurrency } = req.body;
+  
+  if (downloadConcurrency !== undefined) {
+    const value = parseInt(downloadConcurrency);
+    if (value > 0 && value <= 50) {
+      // 更新内存中的配置
+      global.downloadConcurrency = value;
+      res.json({ success: true, message: '配置已更新', downloadConcurrency: value });
+    } else {
+      res.status(400).json({ success: false, error: '并发数必须在1-50之间' });
+    }
+  } else {
+    res.status(400).json({ success: false, error: '缺少配置项' });
+  }
+});
+
 // API: 获取视频源列表
 app.get('/api/sources', (req, res) => {
   try {
     const sources = loadConfig();
     res.json({ success: true, sources });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: 保存视频源列表
+app.post('/api/sources', (req, res) => {
+  const { sources } = req.body;
+  
+  if (!sources || !Array.isArray(sources)) {
+    return res.status(400).json({ success: false, error: '无效的数据' });
+  }
+  
+  try {
+    const configPath = getConfigPath();
+    const config = {
+      settings: {
+        sources: sources,
+        sortBy: "default",
+        searchHistory: true,
+        watchHistory: true
+      }
+    };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    res.json({ success: true, message: '视频源已保存' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: 导出视频源配置
+app.get('/api/sources/export', (req, res) => {
+  try {
+    const sources = loadConfig();
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename=sources.json');
+    res.json({ settings: { sources } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: 导入视频源配置
+app.post('/api/sources/import', (req, res) => {
+  const { sources } = req.body;
+  
+  if (!sources || !Array.isArray(sources)) {
+    return res.status(400).json({ success: false, error: '无效的数据格式' });
+  }
+  
+  try {
+    // 验证数据格式
+    for (const source of sources) {
+      if (!source.id || !source.name || !source.baseUrl) {
+        return res.status(400).json({ success: false, error: '数据格式错误：缺少必要字段' });
+      }
+    }
+    
+    const configPath = getConfigPath();
+    const config = {
+      settings: {
+        sources: sources,
+        sortBy: "default",
+        searchHistory: true,
+        watchHistory: true
+      }
+    };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    res.json({ success: true, message: `成功导入 ${sources.length} 个视频源` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: 添加单个视频源
+app.post('/api/sources/add', (req, res) => {
+  const { source } = req.body;
+  
+  if (!source || !source.id || !source.name || !source.baseUrl) {
+    return res.status(400).json({ success: false, error: '缺少必要字段' });
+  }
+  
+  try {
+    const sources = loadConfig();
+    
+    // 检查ID是否重复
+    if (sources.some(s => s.id === source.id)) {
+      return res.status(400).json({ success: false, error: '视频源ID已存在' });
+    }
+    
+    sources.push({
+      ...source,
+      enabled: source.enabled !== false,
+      priority: source.priority || sources.length + 1
+    });
+    
+    const configPath = getConfigPath();
+    const config = {
+      settings: {
+        sources: sources,
+        sortBy: "default",
+        searchHistory: true,
+        watchHistory: true
+      }
+    };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    res.json({ success: true, message: '视频源已添加' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: 删除视频源
+app.delete('/api/sources/:id', (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    const sources = loadConfig();
+    const filtered = sources.filter(s => s.id !== id);
+    
+    if (filtered.length === sources.length) {
+      return res.status(404).json({ success: false, error: '视频源不存在' });
+    }
+    
+    const configPath = getConfigPath();
+    const config = {
+      settings: {
+        sources: filtered,
+        sortBy: "default",
+        searchHistory: true,
+        watchHistory: true
+      }
+    };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    res.json({ success: true, message: '视频源已删除' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// API: 更新视频源
+app.put('/api/sources/:id', (req, res) => {
+  const { id } = req.params;
+  const { source } = req.body;
+  
+  try {
+    const sources = loadConfig();
+    const index = sources.findIndex(s => s.id === id);
+    
+    if (index === -1) {
+      return res.status(404).json({ success: false, error: '视频源不存在' });
+    }
+    
+    sources[index] = { ...sources[index], ...source };
+    
+    const configPath = getConfigPath();
+    const config = {
+      settings: {
+        sources: sources,
+        sortBy: "default",
+        searchHistory: true,
+        watchHistory: true
+      }
+    };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    res.json({ success: true, message: '视频源已更新' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -745,18 +1227,22 @@ async function downloadM3U8(url, outputDir, filename, task) {
   const tsDir = path.join(outputDir, `${filename}_ts`);
   await mkdirp(tsDir);
   
-  const downloadedFiles = [];
+  const downloadedFiles = new Array(tsUrls.length);
   let downloaded = 0;
+  let failed = 0;
   
-  for (let i = 0; i < tsUrls.length; i++) {
-    const tsUrl = tsUrls[i];
-    const tsFile = path.join(tsDir, `segment_${String(i).padStart(5, '0')}.ts`);
+  // 并发下载TS片段
+  const CONCURRENCY = global.downloadConcurrency || DOWNLOAD_CONCURRENCY; // 使用配置的并发数
+  
+  async function downloadSegment(index) {
+    const tsUrl = tsUrls[index];
+    const tsFile = path.join(tsDir, `segment_${String(index).padStart(5, '0')}.ts`);
     
     // 检查片段是否已下载
     if (fs.existsSync(tsFile)) {
-      downloadedFiles.push(tsFile);
+      downloadedFiles[index] = tsFile;
       downloaded++;
-      continue;
+      return;
     }
     
     try {
@@ -770,7 +1256,7 @@ async function downloadM3U8(url, outputDir, filename, task) {
       });
       
       fs.writeFileSync(tsFile, response.data);
-      downloadedFiles.push(tsFile);
+      downloadedFiles[index] = tsFile;
       downloaded++;
       
       // 更新进度
@@ -778,21 +1264,36 @@ async function downloadM3U8(url, outputDir, filename, task) {
         task.currentProgress = Math.round((downloaded / tsUrls.length) * 100);
       }
     } catch (error) {
-      console.error(`下载片段失败 ${i}: ${error.message}`);
+      failed++;
+      console.error(`下载片段 ${index} 失败: ${error.message}`);
     }
   }
   
-  console.log(`成功下载 ${downloaded}/${tsUrls.length} 个片段`);
+  // 分批并发下载
+  for (let i = 0; i < tsUrls.length; i += CONCURRENCY) {
+    const batch = [];
+    for (let j = i; j < Math.min(i + CONCURRENCY, tsUrls.length); j++) {
+      batch.push(downloadSegment(j));
+    }
+    await Promise.all(batch);
+  }
+  
+  console.log(`成功下载 ${downloaded}/${tsUrls.length} 个片段，失败 ${failed} 个`);
+  
+  // 过滤掉失败的片段
+  const validFiles = downloadedFiles.filter(f => f);
+  
+  if (validFiles.length === 0) {
+    throw new Error('所有片段下载失败');
+  }
   
   // 合并ts文件
   const tsOutputFile = path.join(outputDir, `${filename}.ts`);
   const writeStream = fs.createWriteStream(tsOutputFile);
   
-  for (const tsFile of downloadedFiles) {
-    if (fs.existsSync(tsFile)) {
-      const data = fs.readFileSync(tsFile);
-      writeStream.write(data);
-    }
+  for (const tsFile of validFiles) {
+    const data = fs.readFileSync(tsFile);
+    writeStream.write(data);
   }
   
   writeStream.end();
@@ -898,4 +1399,7 @@ mkdirp.sync(DOWNLOADS_DIR);
 // 启动服务器
 app.listen(PORT, () => {
   console.log(`服务器已启动: http://localhost:${PORT}`);
+  console.log(`下载并发数: ${DOWNLOAD_CONCURRENCY}`);
+  console.log(`下载目录: ${DOWNLOADS_DIR}`);
+  console.log(`FFmpeg路径: ${FFMPEG_PATH}`);
 });

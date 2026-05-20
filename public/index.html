@@ -807,6 +807,193 @@
       margin-right: 8px;
       vertical-align: middle;
     }
+
+    /* 设置页面样式 */
+    .settings-section {
+      max-width: 800px;
+    }
+
+    .settings-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .settings-card h3 {
+      font-size: 16px;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+
+    .settings-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .settings-item:last-child {
+      border-bottom: none;
+    }
+
+    .settings-item label {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .settings-item input[type="number"],
+    .settings-item input[type="text"] {
+      width: 120px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .settings-item .btn {
+      margin-left: 12px;
+    }
+
+    .source-list {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .source-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      background: var(--bg);
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .source-item .source-info {
+      flex: 1;
+    }
+
+    .source-item .source-name {
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .source-item .source-url {
+      font-size: 12px;
+      color: var(--text-muted);
+      word-break: break-all;
+    }
+
+    .source-item .source-actions {
+      display: flex;
+      gap: 8px;
+      margin-left: 12px;
+    }
+
+    .source-item .toggle-btn {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .source-item .toggle-btn.enabled {
+      background: rgba(34, 197, 94, 0.2);
+      color: var(--success);
+    }
+
+    .source-item .toggle-btn.disabled {
+      background: rgba(239, 68, 68, 0.2);
+      color: var(--error);
+    }
+
+    .import-export-btns {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .file-input {
+      display: none;
+    }
+
+    /* 视频源编辑弹窗 */
+    .source-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .source-modal.active {
+      display: flex;
+    }
+
+    .source-modal-content {
+      background: var(--bg-card);
+      border-radius: 12px;
+      padding: 24px;
+      width: 90%;
+      max-width: 500px;
+    }
+
+    .source-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .source-modal-header h3 {
+      font-size: 18px;
+      margin: 0;
+    }
+
+    .source-form-group {
+      margin-bottom: 16px;
+    }
+
+    .source-form-group label {
+      display: block;
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .source-form-group input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    .source-form-group input:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .source-form-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
@@ -816,6 +1003,7 @@
       <div class="nav-tabs">
         <div class="nav-tab active" data-tab="search">搜索下载</div>
         <div class="nav-tab" data-tab="downloads">已下载</div>
+        <div class="nav-tab" data-tab="settings">设置</div>
       </div>
     </div>
   </header>
@@ -885,6 +1073,37 @@
     <!-- 已下载区域 -->
     <div id="downloads-section" class="section">
       <div class="downloads-list" id="downloadsList"></div>
+    </div>
+
+    <!-- 设置区域 -->
+    <div id="settings-section" class="section">
+      <div class="settings-section">
+        <!-- 下载设置 -->
+        <div class="settings-card">
+          <h3>下载设置</h3>
+          <div class="settings-item">
+            <label>下载并发数</label>
+            <div style="display: flex; align-items: center;">
+              <input type="number" id="concurrencyInput" min="1" max="50" value="10">
+              <button class="btn btn-sm btn-primary" onclick="saveConcurrency()">保存</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 视频源管理 -->
+        <div class="settings-card">
+          <h3>视频源管理</h3>
+          <div class="import-export-btns">
+            <button class="btn btn-primary" onclick="importSources()">导入配置</button>
+            <button class="btn btn-secondary" onclick="exportSources()">导出配置</button>
+            <button class="btn btn-secondary" onclick="addSource()">添加源</button>
+            <input type="file" id="importFile" class="file-input" accept=".json" onchange="handleImport(event)">
+          </div>
+          <div class="source-list" id="sourceList">
+            <div class="loading"><div class="spinner"></div>加载中...</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -1444,6 +1663,246 @@
       updateAutoPlayBtn();
     }
 
+    // ========== 设置页面功能 ==========
+    
+    // 加载设置
+    async function loadSettings() {
+      try {
+        const res = await fetch(`${API_BASE}/api/config`);
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('concurrencyInput').value = data.config.downloadConcurrency;
+        }
+      } catch (error) {
+        console.error('加载设置失败:', error);
+      }
+      
+      loadSourcesList();
+    }
+    
+    // 保存并发数
+    async function saveConcurrency() {
+      const value = document.getElementById('concurrencyInput').value;
+      try {
+        const res = await fetch(`${API_BASE}/api/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ downloadConcurrency: parseInt(value) })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert('保存成功');
+        } else {
+          alert(data.error || '保存失败');
+        }
+      } catch (error) {
+        alert('保存失败: ' + error.message);
+      }
+    }
+    
+    // 加载视频源列表
+    async function loadSourcesList() {
+      const container = document.getElementById('sourceList');
+      try {
+        const res = await fetch(`${API_BASE}/api/sources`);
+        const data = await res.json();
+        
+        if (data.success && data.sources.length > 0) {
+          container.innerHTML = data.sources.map(source => `
+            <div class="source-item">
+              <div class="source-info">
+                <div class="source-name">${source.name} (${source.id})</div>
+                <div class="source-url">${source.baseUrl}</div>
+              </div>
+              <div class="source-actions">
+                <button class="toggle-btn ${source.enabled !== false ? 'enabled' : 'disabled'}" 
+                        onclick="toggleSource('${source.id}', ${source.enabled !== false})">
+                  ${source.enabled !== false ? '启用' : '禁用'}
+                </button>
+                <button class="btn btn-sm btn-secondary" onclick="editSource('${source.id}')">编辑</button>
+                <button class="btn btn-sm btn-secondary" onclick="deleteSource('${source.id}')" style="color: var(--error);">删除</button>
+              </div>
+            </div>
+          `).join('');
+        } else {
+          container.innerHTML = '<div class="empty-state"><p>暂无视频源</p></div>';
+        }
+      } catch (error) {
+        container.innerHTML = '<div class="empty-state"><p>加载失败</p></div>';
+      }
+    }
+    
+    // 切换视频源状态
+    async function toggleSource(id, enabled) {
+      try {
+        const res = await fetch(`${API_BASE}/api/sources/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: { enabled: !enabled } })
+        });
+        const data = await res.json();
+        if (data.success) {
+          loadSourcesList();
+        }
+      } catch (error) {
+        alert('操作失败');
+      }
+    }
+    
+    // 删除视频源
+    async function deleteSource(id) {
+      if (!confirm('确定删除此视频源？')) return;
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/sources/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+          loadSourcesList();
+        } else {
+          alert(data.error || '删除失败');
+        }
+      } catch (error) {
+        alert('删除失败');
+      }
+    }
+    
+    // 当前编辑的视频源ID
+    let editingSourceId = null;
+    
+    // 打开添加视频源弹窗
+    function addSource() {
+      editingSourceId = null;
+      document.getElementById('sourceModalTitle').textContent = '添加视频源';
+      document.getElementById('sourceId').value = '';
+      document.getElementById('sourceId').disabled = false;
+      document.getElementById('sourceName').value = '';
+      document.getElementById('sourceBaseUrl').value = '';
+      document.getElementById('sourceModal').classList.add('active');
+    }
+    
+    // 打开编辑视频源弹窗
+    async function editSource(id) {
+      editingSourceId = id;
+      document.getElementById('sourceModalTitle').textContent = '编辑视频源';
+      
+      // 获取当前视频源信息
+      try {
+        const res = await fetch(`${API_BASE}/api/sources`);
+        const data = await res.json();
+        if (data.success) {
+          const source = data.sources.find(s => s.id === id);
+          if (source) {
+            document.getElementById('sourceId').value = source.id;
+            document.getElementById('sourceId').disabled = true;
+            document.getElementById('sourceName').value = source.name;
+            document.getElementById('sourceBaseUrl').value = source.baseUrl;
+            document.getElementById('sourceModal').classList.add('active');
+          }
+        }
+      } catch (error) {
+        alert('获取信息失败');
+      }
+    }
+    
+    // 关闭视频源弹窗
+    function closeSourceModal() {
+      document.getElementById('sourceModal').classList.remove('active');
+      editingSourceId = null;
+    }
+    
+    // 提交视频源表单
+    async function submitSourceForm(event) {
+      event.preventDefault();
+      
+      const id = document.getElementById('sourceId').value.trim();
+      const name = document.getElementById('sourceName').value.trim();
+      const baseUrl = document.getElementById('sourceBaseUrl').value.trim();
+      
+      if (!id || !name || !baseUrl) {
+        alert('请填写所有字段');
+        return;
+      }
+      
+      try {
+        let res;
+        if (editingSourceId) {
+          // 编辑模式
+          res = await fetch(`${API_BASE}/api/sources/${editingSourceId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: { name, baseUrl } })
+          });
+        } else {
+          // 添加模式
+          res = await fetch(`${API_BASE}/api/sources/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: { id, name, baseUrl, enabled: true } })
+          });
+        }
+        
+        const data = await res.json();
+        if (data.success) {
+          closeSourceModal();
+          loadSourcesList();
+        } else {
+          alert(data.error || '操作失败');
+        }
+      } catch (error) {
+        alert('操作失败: ' + error.message);
+      }
+    }
+    
+    // 导出视频源配置
+    function exportSources() {
+      window.location.href = `${API_BASE}/api/sources/export`;
+    }
+    
+    // 导入视频源配置
+    function importSources() {
+      document.getElementById('importFile').click();
+    }
+    
+    // 处理导入
+    async function handleImport(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        
+        let sources = [];
+        if (data.settings && data.settings.sources) {
+          sources = data.settings.sources;
+        } else if (Array.isArray(data)) {
+          sources = data;
+        } else {
+          alert('无效的配置文件格式');
+          return;
+        }
+        
+        const res = await fetch(`${API_BASE}/api/sources/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sources })
+        });
+        
+        const result = await res.json();
+        if (result.success) {
+          alert(result.message);
+          loadSourcesList();
+        } else {
+          alert(result.error || '导入失败');
+        }
+      } catch (error) {
+        alert('导入失败: ' + error.message);
+      }
+      
+      // 清空文件输入
+      event.target.value = '';
+    }
+
     // 更新播放器内投屏按钮状态
     function updatePlayerCastBtn() {
       const btn = document.getElementById('playerCastBtn');
@@ -1541,6 +2000,8 @@
           
           if (tab.dataset.tab === 'downloads') {
             loadDownloads();
+          } else if (tab.dataset.tab === 'settings') {
+            loadSettings();
           }
         });
       });
@@ -1726,6 +2187,34 @@
       <button class="cast-action-btn" onclick="pauseCast()">⏸ 暂停</button>
       <button class="cast-action-btn" onclick="resumeCast()">▶ 继续</button>
       <button class="cast-action-btn stop" onclick="stopCast()">⏹ 停止</button>
+    </div>
+  </div>
+
+  <!-- 视频源编辑弹窗 -->
+  <div class="source-modal" id="sourceModal">
+    <div class="source-modal-content">
+      <div class="source-modal-header">
+        <h3 id="sourceModalTitle">添加视频源</h3>
+        <button class="close-btn" onclick="closeSourceModal()">&times;</button>
+      </div>
+      <form id="sourceForm" onsubmit="submitSourceForm(event)">
+        <div class="source-form-group">
+          <label>视频源ID</label>
+          <input type="text" id="sourceId" placeholder="英文标识，如: mysource" required>
+        </div>
+        <div class="source-form-group">
+          <label>视频源名称</label>
+          <input type="text" id="sourceName" placeholder="显示名称，如: 我的视频源" required>
+        </div>
+        <div class="source-form-group">
+          <label>API地址</label>
+          <input type="text" id="sourceBaseUrl" placeholder="如: https://example.com/api.php/provide/vod" required>
+        </div>
+        <div class="source-form-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeSourceModal()">取消</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
     </div>
   </div>
 </body>

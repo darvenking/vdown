@@ -1,6 +1,7 @@
 node_modules
 npm-debug.log
 downloads
+db.json
 .git
 .gitignore
 README.md

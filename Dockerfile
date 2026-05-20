@@ -28,6 +28,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV FFMPEG_PATH=/usr/bin/ffmpeg
 ENV DOWNLOADS_DIR=/app/downloads
+ENV DOWNLOAD_CONCURRENCY=10
 
 # 启动应用
 CMD ["node", "server.js"]

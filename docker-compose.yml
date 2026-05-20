@@ -13,13 +13,14 @@ services:
     volumes:
       # 下载目录挂载 - 持久化存储
       - ./downloads:/app/downloads
-      # 可选：挂载视频源配置文件
-      # - ./kvideo-settings.json:/app/kvideo-settings.json:ro
+      # 数据库文件挂载 - 持久化任务记录
+      - ./db.json:/app/db.json
     environment:
       - NODE_ENV=production
       - PORT=3000
       - FFMPEG_PATH=/usr/bin/ffmpeg
       - DOWNLOADS_DIR=/app/downloads
+      - DOWNLOAD_CONCURRENCY=10
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
       interval: 30s
