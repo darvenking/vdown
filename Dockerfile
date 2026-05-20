@@ -6,16 +6,15 @@ RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 # 设置工作目录
 WORKDIR /app
 
-# 复制package.json和package-lock.json
-COPY package.json package-lock.json ./
+# 复制package.json
+COPY package.json ./
 
 # 安装依赖
-RUN npm ci --production --ignore-scripts 2>/dev/null || npm install --production --ignore-scripts
+RUN npm install --production
 
 # 复制应用代码
 COPY server.js ./
 COPY public ./public/
-COPY *.json ./
 
 # 创建下载目录
 RUN mkdir -p /app/downloads

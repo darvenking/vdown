@@ -1,10 +1,10 @@
 node_modules
 npm-debug.log
+package-lock.json
 downloads
 db.json
 .git
 .gitignore
 README.md
-LICENSE
-.github
+LICENSE.github
 *.md
