@@ -1280,20 +1280,20 @@ async function downloadM3U8(url, outputDir, filename, task) {
   
   console.log(`成功下载 ${downloaded}/${tsUrls.length} 个片段，失败 ${failed} 个`);
   
-  // 过滤掉失败的片段
-  const validFiles = downloadedFiles.filter(f => f);
-  
-  if (validFiles.length === 0) {
-    throw new Error('所有片段下载失败');
+  // 检查是否有失败的片段
+  if (failed > 0) {
+    console.log(`警告: ${failed} 个片段下载失败`);
   }
   
-  // 合并ts文件
+  // 按顺序合并ts文件，跳过失败的片段
   const tsOutputFile = path.join(outputDir, `${filename}.ts`);
   const writeStream = fs.createWriteStream(tsOutputFile);
   
-  for (const tsFile of validFiles) {
-    const data = fs.readFileSync(tsFile);
-    writeStream.write(data);
+  for (let i = 0; i < downloadedFiles.length; i++) {
+    if (downloadedFiles[i]) {
+      const data = fs.readFileSync(downloadedFiles[i]);
+      writeStream.write(data);
+    }
   }
   
   writeStream.end();
