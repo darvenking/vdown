@@ -994,6 +994,123 @@
       justify-content: flex-end;
       margin-top: 20px;
     }
+
+    /* 下载任务样式 */
+    .task-item {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .task-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .task-name {
+      font-size: 14px;
+      font-weight: 500;
+      flex: 1;
+    }
+
+    .task-status {
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      margin-left: 12px;
+    }
+
+    .task-status.running {
+      background: rgba(99, 102, 241, 0.2);
+      color: var(--primary);
+    }
+
+    .task-status.completed {
+      background: rgba(34, 197, 94, 0.2);
+      color: var(--success);
+    }
+
+    .task-status.paused {
+      background: rgba(245, 158, 11, 0.2);
+      color: var(--warning);
+    }
+
+    .task-status.failed {
+      background: rgba(239, 68, 68, 0.2);
+      color: var(--error);
+    }
+
+    .task-info {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .task-progress {
+      width: 100%;
+      height: 6px;
+      background: var(--bg-hover);
+      border-radius: 3px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    .task-progress-bar {
+      height: 100%;
+      background: var(--primary);
+      border-radius: 3px;
+      transition: width 0.3s;
+    }
+
+    .task-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .task-episodes {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .task-episode {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      font-size: 12px;
+    }
+
+    .task-episode .ep-name {
+      flex: 1;
+    }
+
+    .task-episode .ep-status {
+      margin-left: 12px;
+    }
+
+    .task-episode .ep-status.pending {
+      color: var(--text-muted);
+    }
+
+    .task-episode .ep-status.downloading {
+      color: var(--primary);
+    }
+
+    .task-episode .ep-status.completed {
+      color: var(--success);
+    }
+
+    .task-episode .ep-status.skipped {
+      color: var(--warning);
+    }
+
+    .task-episode .ep-status.failed {
+      color: var(--error);
+    }
   </style>
 </head>
 <body>
@@ -1002,6 +1119,7 @@
       <h1>视频下载器</h1>
       <div class="nav-tabs">
         <div class="nav-tab active" data-tab="search">搜索下载</div>
+        <div class="nav-tab" data-tab="tasks">下载任务</div>
         <div class="nav-tab" data-tab="downloads">已下载</div>
         <div class="nav-tab" data-tab="settings">设置</div>
       </div>
@@ -1073,6 +1191,21 @@
     <!-- 已下载区域 -->
     <div id="downloads-section" class="section">
       <div class="downloads-list" id="downloadsList"></div>
+    </div>
+
+    <!-- 下载任务区域 -->
+    <div id="tasks-section" class="section">
+      <div class="settings-section">
+        <div class="settings-card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="margin: 0;">下载任务</h3>
+            <button class="btn btn-sm btn-secondary" onclick="loadTasks()">刷新</button>
+          </div>
+          <div id="tasksList" class="source-list">
+            <div class="empty-state"><p>暂无下载任务</p></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 设置区域 -->
@@ -1903,6 +2036,169 @@
       event.target.value = '';
     }
 
+    // ========== 下载任务功能 ==========
+    
+    let tasksTimer = null;
+    
+    // 加载下载任务列表
+    async function loadTasks() {
+      const container = document.getElementById('tasksList');
+      try {
+        const res = await fetch(`${API_BASE}/api/download/tasks`);
+        const data = await res.json();
+        
+        if (data.success && data.tasks.length > 0) {
+          container.innerHTML = data.tasks.map(task => renderTaskItem(task)).join('');
+          
+          // 如果有运行中的任务，启动自动刷新
+          const hasRunning = data.tasks.some(t => t.status === 'running');
+          if (hasRunning && !tasksTimer) {
+            tasksTimer = setInterval(loadTasks, 1000);
+          } else if (!hasRunning && tasksTimer) {
+            clearInterval(tasksTimer);
+            tasksTimer = null;
+          }
+        } else {
+          container.innerHTML = '<div class="empty-state"><p>暂无下载任务</p></div>';
+          if (tasksTimer) {
+            clearInterval(tasksTimer);
+            tasksTimer = null;
+          }
+        }
+      } catch (error) {
+        container.innerHTML = '<div class="empty-state"><p>加载失败</p></div>';
+      }
+    }
+    
+    // 渲染任务项
+    function renderTaskItem(task) {
+      const percent = task.total > 0 ? Math.round((task.completed / task.total) * 100) : 0;
+      const statusClass = task.status;
+      const statusText = {
+        'pending': '等待中',
+        'running': '下载中',
+        'paused': '已暂停',
+        'completed': '已完成',
+        'failed': '失败'
+      }[task.status] || task.status;
+      
+      let episodesHtml = '';
+      if (task.episodes && task.episodes.length > 0) {
+        episodesHtml = `
+          <div class="task-episodes">
+            ${task.episodes.map(ep => {
+              const epStatusClass = ep.status || 'pending';
+              const epStatusText = {
+                'pending': '等待',
+                'downloading': '下载中',
+                'completed': '完成',
+                'skipped': '跳过',
+                'failed': '失败'
+              }[ep.status] || '等待';
+              return `
+                <div class="task-episode">
+                  <span class="ep-name">${ep.name}</span>
+                  <span class="ep-status ${epStatusClass}">${epStatusText}</span>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `;
+      }
+      
+      let actionsHtml = '';
+      if (task.status === 'running') {
+        actionsHtml = `
+          <button class="btn btn-sm btn-secondary" onclick="pauseTask('${task.id}')">暂停</button>
+          <button class="btn btn-sm btn-secondary" onclick="deleteTask('${task.id}')" style="color: var(--error);">删除</button>
+        `;
+      } else if (task.status === 'paused') {
+        actionsHtml = `
+          <button class="btn btn-sm btn-primary" onclick="resumeTask('${task.id}')">恢复</button>
+          <button class="btn btn-sm btn-secondary" onclick="deleteTask('${task.id}')" style="color: var(--error);">删除</button>
+        `;
+      } else if (task.status === 'completed' || task.status === 'failed') {
+        actionsHtml = `
+          <button class="btn btn-sm btn-secondary" onclick="deleteTask('${task.id}')" style="color: var(--error);">删除</button>
+        `;
+      }
+      
+      let currentText = '';
+      if (task.current && task.status === 'running') {
+        if (task.currentProgress === -1) {
+          currentText = `<div class="task-info" style="color: var(--warning);">当前: ${task.current} (转换MP4中...)</div>`;
+        } else if (task.currentProgress > 0) {
+          currentText = `<div class="task-info">当前: ${task.current} (${task.currentProgress}%)</div>`;
+        } else {
+          currentText = `<div class="task-info">当前: ${task.current}</div>`;
+        }
+      }
+      
+      // 当前集进度条
+      let currentProgressBar = '';
+      if (task.status === 'running' && task.currentProgress > 0 && task.currentProgress <= 100) {
+        currentProgressBar = `
+          <div class="task-progress" style="margin-top: 4px;">
+            <div class="task-progress-bar" style="width: ${task.currentProgress}%; background: var(--success);"></div>
+          </div>
+        `;
+      }
+      
+      return `
+        <div class="task-item">
+          <div class="task-header">
+            <span class="task-name">${task.videoName}</span>
+            <span class="task-status ${statusClass}">${statusText}</span>
+          </div>
+          <div class="task-info">
+            完成: ${task.completed}/${task.total} 
+            ${task.skipped > 0 ? ` | 跳过: ${task.skipped}` : ''}
+            ${task.failed > 0 ? ` | 失败: ${task.failed}` : ''}
+          </div>
+          ${currentText}
+          <div class="task-progress">
+            <div class="task-progress-bar" style="width: ${percent}%"></div>
+          </div>
+          ${currentProgressBar}
+          <div class="task-actions">
+            ${actionsHtml}
+          </div>
+          ${episodesHtml}
+        </div>
+      `;
+    }
+    
+    // 暂停任务
+    async function pauseTask(taskId) {
+      try {
+        await fetch(`${API_BASE}/api/download/pause/${taskId}`, { method: 'POST' });
+        loadTasks();
+      } catch (error) {
+        console.error('暂停失败:', error);
+      }
+    }
+    
+    // 恢复任务
+    async function resumeTask(taskId) {
+      try {
+        await fetch(`${API_BASE}/api/download/resume/${taskId}`, { method: 'POST' });
+        loadTasks();
+      } catch (error) {
+        console.error('恢复失败:', error);
+      }
+    }
+    
+    // 删除任务
+    async function deleteTask(taskId) {
+      if (!confirm('确定删除此任务？')) return;
+      try {
+        await fetch(`${API_BASE}/api/download/${taskId}`, { method: 'DELETE' });
+        loadTasks();
+      } catch (error) {
+        console.error('删除失败:', error);
+      }
+    }
+
     // 更新播放器内投屏按钮状态
     function updatePlayerCastBtn() {
       const btn = document.getElementById('playerCastBtn');
@@ -2000,6 +2296,8 @@
           
           if (tab.dataset.tab === 'downloads') {
             loadDownloads();
+          } else if (tab.dataset.tab === 'tasks') {
+            loadTasks();
           } else if (tab.dataset.tab === 'settings') {
             loadSettings();
           }
