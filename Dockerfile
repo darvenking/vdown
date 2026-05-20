@@ -1,16 +1,16 @@
-FROM node:18-alpine
+FROM node:18-slim
 
-# 安装ffmpeg
-RUN apk add --no-cache ffmpeg
+# 安装ffmpeg和必要工具
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 # 设置工作目录
 WORKDIR /app
 
-# 复制package.json
-COPY package.json ./
+# 复制package.json和package-lock.json
+COPY package.json package-lock.json ./
 
 # 安装依赖
-RUN npm install --production
+RUN npm ci --production --ignore-scripts 2>/dev/null || npm install --production --ignore-scripts
 
 # 复制应用代码
 COPY server.js ./
